@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.gdesoutter.proxmox",
+  "name": "Proxmox",
+  "version": "0.1.0",
+  "author": "Guillaume Desoutter",
+  "license": "MIT",
+  "description": "Proxmox VE guest status, CPU and memory usage in the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "Proxmox",
+    "description": "Guest status and metrics from a Proxmox VE cluster",
+    "category": "System",
+    "allowMultiple": true,
+    "defaultSection": "right",
+    "defaults": {
+      "endpoint": "https://proxmox.example.com:8006",
+      "credentialsFile": "",
+      "caBundle": "",
+      "interval": 15,
+      "label": "",
+      "watchedGuests": []
+    },
+    "schema": [
+      { "key": "endpoint",        "type": "string", "label": "PVE API endpoint" },
+      { "key": "credentialsFile", "type": "string", "label": "Credentials file (blank = default)" },
+      { "key": "caBundle",        "type": "string", "label": "CA bundle path (blank = system store)" },
+      { "key": "interval",        "type": "int",    "label": "Refresh interval (seconds)" },
+      { "key": "label",           "type": "string", "label": "Cluster label" }
+    ]
+  }
+}

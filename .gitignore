@@ -1,0 +1,7 @@
+*.swp
+*~
+credentials
+*.pem
+*.key
+*.env
+.env
