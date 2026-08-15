@@ -21,10 +21,20 @@ emit_error() {
 
 command -v jq   >/dev/null 2>&1 || { printf '{"error":"jq is not installed"}\n'; exit 0; }
 command -v curl >/dev/null 2>&1 || emit_error "curl is not installed"
-[[ -n "$ENDPOINT" ]]  || emit_error "no endpoint configured"
-[[ "$ENDPOINT" == https://* ]] || emit_error "endpoint must use https://"
+
+# The endpoint comes from user configuration and is interpolated into the curl
+# config stream below. Anything but a bare https host[:port] is rejected: that
+# blocks http://, and also blocks quotes and newlines, which could otherwise
+# inject arbitrary curl directives — including a second url= line that would
+# send the authenticated request somewhere else entirely.
+[[ -n "$ENDPOINT" ]] || emit_error "no endpoint configured"
+[[ "$ENDPOINT" =~ ^https://[A-Za-z0-9._-]+(:[0-9]{1,5})?/?$ ]] \
+  || emit_error "invalid endpoint: expected https://host[:port]"
+
 [[ -r "$CRED_FILE" ]] || emit_error "credentials file not readable: $CRED_FILE"
 
+# Sourced, not exported: the credentials stay shell variables, so they never
+# appear in /proc/<pid>/environ for the curl children.
 # shellcheck source=/dev/null
 source "$CRED_FILE"
 [[ -n "${PVE_TOKEN_ID:-}" && -n "${PVE_TOKEN_SECRET:-}" ]] \
@@ -43,8 +53,12 @@ pve_curl() {
   | curl "${curl_args[@]}"
 }
 
+# curl's stderr is surfaced in the widget tooltip. Strip the secret from it in
+# case a config parse error ever echoes the offending line back.
+redact() { printf '%s' "${1//"$PVE_TOKEN_SECRET"/REDACTED}"; }
+
 if ! raw=$(pve_curl "${ENDPOINT%/}/api2/json/cluster/resources?type=vm" 5 2>&1); then
-  emit_error "PVE unreachable: ${raw:0:160}"
+  emit_error "PVE unreachable: $(redact "${raw:0:160}")"
 fi
 
 guests=$(printf '%s' "$raw" | jq -c '
@@ -71,7 +85,11 @@ CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-proxmox"
 mkdir -p "$CACHE" 2>/dev/null
 
 while read -r node vmid; do
-  [[ -z "$vmid" ]] && continue
+  # Both come from the API, but they are interpolated into a URL and a cache
+  # path, so they are constrained rather than trusted.
+  [[ "$vmid" =~ ^[0-9]+$ ]]          || continue
+  [[ "$node" =~ ^[A-Za-z0-9._-]+$ ]] || continue
+
   cf="$CACHE/ostype-$vmid"
   ost=""
   if [[ -f "$cf" ]] && find "$cf" -mmin -1440 -print -quit 2>/dev/null | grep -q .; then
@@ -79,7 +97,7 @@ while read -r node vmid; do
   else
     cfg=$(pve_curl "${ENDPOINT%/}/api2/json/nodes/${node}/qemu/${vmid}/config" 3 2>/dev/null) || continue
     ost=$(printf '%s' "$cfg" | jq -r '.data.ostype // "other"' 2>/dev/null)
-    [[ -n "$ost" ]] && printf '%s' "$ost" > "$cf"
+    [[ "$ost" =~ ^[A-Za-z0-9]+$ ]] && printf '%s' "$ost" > "$cf"
   fi
   [[ -z "$ost" ]] && continue
   guests=$(printf '%s' "$guests" | jq -c --argjson v "$vmid" --arg o "$ost" '
