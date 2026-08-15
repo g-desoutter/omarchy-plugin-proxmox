@@ -22,6 +22,7 @@ emit_error() {
 command -v jq   >/dev/null 2>&1 || { printf '{"error":"jq is not installed"}\n'; exit 0; }
 command -v curl >/dev/null 2>&1 || emit_error "curl is not installed"
 [[ -n "$ENDPOINT" ]]  || emit_error "no endpoint configured"
+[[ "$ENDPOINT" == https://* ]] || emit_error "endpoint must use https://"
 [[ -r "$CRED_FILE" ]] || emit_error "credentials file not readable: $CRED_FILE"
 
 # shellcheck source=/dev/null
@@ -29,14 +30,20 @@ source "$CRED_FILE"
 [[ -n "${PVE_TOKEN_ID:-}" && -n "${PVE_TOKEN_SECRET:-}" ]] \
   || emit_error "PVE_TOKEN_ID / PVE_TOKEN_SECRET missing in $CRED_FILE"
 
-curl_args=(
-  --silent --show-error --fail-with-body --max-time 5
-  --header "Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}"
-)
+curl_args=(--silent --show-error --fail-with-body --config -)
 [[ -n "$CA_BUNDLE" ]] && curl_args+=(--cacert "$CA_BUNDLE")
 
-if ! raw=$(curl "${curl_args[@]}" \
-      "${ENDPOINT%/}/api2/json/cluster/resources?type=vm" 2>&1); then
+# The credential header and the URL are fed to curl over stdin rather than as
+# arguments, so the token never appears in /proc/<pid>/cmdline where any
+# same-UID process could read it while a poll is in flight.
+#   $1 = url, $2 = max-time in seconds
+pve_curl() {
+  printf 'header = "Authorization: PVEAPIToken=%s=%s"\nmax-time = %s\nurl = "%s"\n' \
+    "$PVE_TOKEN_ID" "$PVE_TOKEN_SECRET" "$2" "$1" \
+  | curl "${curl_args[@]}"
+}
+
+if ! raw=$(pve_curl "${ENDPOINT%/}/api2/json/cluster/resources?type=vm" 5 2>&1); then
   emit_error "PVE unreachable: ${raw:0:160}"
 fi
 
@@ -70,8 +77,7 @@ while read -r node vmid; do
   if [[ -f "$cf" ]] && find "$cf" -mmin -1440 -print -quit 2>/dev/null | grep -q .; then
     ost=$(<"$cf")
   else
-    cfg=$(curl "${curl_args[@]}" --max-time 3 \
-      "${ENDPOINT%/}/api2/json/nodes/${node}/qemu/${vmid}/config" 2>/dev/null) || continue
+    cfg=$(pve_curl "${ENDPOINT%/}/api2/json/nodes/${node}/qemu/${vmid}/config" 3 2>/dev/null) || continue
     ost=$(printf '%s' "$cfg" | jq -r '.data.ostype // "other"' 2>/dev/null)
     [[ -n "$ost" ]] && printf '%s' "$ost" > "$cf"
   fi
