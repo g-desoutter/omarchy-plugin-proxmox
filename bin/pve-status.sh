@@ -40,7 +40,7 @@ if ! raw=$(curl "${curl_args[@]}" \
   emit_error "PVE unreachable: ${raw:0:160}"
 fi
 
-printf '%s' "$raw" | jq -c '
+guests=$(printf '%s' "$raw" | jq -c '
   { guests: [ .data[]
       | { id:     .id,
           vmid:   .vmid,
@@ -52,6 +52,33 @@ printf '%s' "$raw" | jq -c '
           maxcpu: (.maxcpu // 0),
           mem:    (.mem    // 0),
           maxmem: (.maxmem // 0),
-          uptime: (.uptime // 0) }
+          uptime: (.uptime // 0),
+          ostype: null }
     ] | sort_by(.status != "running", (.name | ascii_downcase)) }
-' 2>/dev/null || emit_error "unexpected API payload"
+' 2>/dev/null) || emit_error "unexpected API payload"
+
+# Guest OS type comes from the VM config, not from cluster/resources. It is a
+# declarative field that effectively never changes, so it is cached for a day
+# to keep this to one extra request per guest per day.
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-proxmox"
+mkdir -p "$CACHE" 2>/dev/null
+
+while read -r node vmid; do
+  [[ -z "$vmid" ]] && continue
+  cf="$CACHE/ostype-$vmid"
+  ost=""
+  if [[ -f "$cf" ]] && find "$cf" -mmin -1440 -print -quit 2>/dev/null | grep -q .; then
+    ost=$(<"$cf")
+  else
+    cfg=$(curl "${curl_args[@]}" --max-time 3 \
+      "${ENDPOINT%/}/api2/json/nodes/${node}/qemu/${vmid}/config" 2>/dev/null) || continue
+    ost=$(printf '%s' "$cfg" | jq -r '.data.ostype // "other"' 2>/dev/null)
+    [[ -n "$ost" ]] && printf '%s' "$ost" > "$cf"
+  fi
+  [[ -z "$ost" ]] && continue
+  guests=$(printf '%s' "$guests" | jq -c --argjson v "$vmid" --arg o "$ost" '
+    .guests |= map(if .vmid == $v then .ostype = $o else . end)')
+done < <(printf '%s' "$guests" | jq -r '
+  .guests[] | select(.type == "qemu") | "\(.node) \(.vmid)"')
+
+printf '%s\n' "$guests"

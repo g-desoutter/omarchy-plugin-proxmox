@@ -5,6 +5,8 @@ A bar widget for [Omarchy Quattro](https://omarchy.org) showing Proxmox VE guest
 The bar shows `running / total`. Click it for a panel listing every guest with its live metrics. 
 The widget turns to the bar's alert colour when the API is unreachable, or when a guest you explicitly watch is not running.
 
+![The Proxmox widget and its panel in the Omarchy bar](preview.png)
+
 ## Requirements
 
 - `curl` and `jq` on the machine running Omarchy
@@ -113,6 +115,9 @@ widget stays quiet.
 **Memory figures.** `mem` is memory as seen by the hypervisor, not pressure inside the guest. A Linux guest filling its page cache, or a Windows guest caching aggressively, will read high without being short of RAM. Don't size guests from this number; check *Available Memory* inside the guest instead.
 
 **CPU figures.** `cpu` is already normalised across all vCPUs assigned to the guest, so 100% means the guest is saturating its allocation — not one core.
+
+**Guest OS icons.** The OS type comes from each VM's `ostype` config field, which is declarative rather than detected — a guest created with the wrong value shows the wrong icon. 
+It is cached for 24 hours under `$XDG_CACHE_HOME/omarchy-proxmox`, so the extra request happens once per guest per day.Containers always show the container icon.
 
 ## Privileges
 

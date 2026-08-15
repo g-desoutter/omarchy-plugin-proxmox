@@ -11,8 +11,6 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
 
-  // Keeps the refresh icon spinning for at least 500 ms so a fast LAN fetch
-  // still produces a visible acknowledgement of the click.
   property bool spinning: false
 
   readonly property var    guests:    hostWidget ? hostWidget.guests : []
@@ -20,6 +18,12 @@ Panel {
   readonly property bool   fetching:  hostWidget ? hostWidget.fetching === true : false
   readonly property string title:
     hostWidget ? (hostWidget.clusterLabel || hostWidget.endpoint) : "Proxmox"
+
+  readonly property real colOs:   Style.space(16)
+  readonly property real colName: 0.34
+  readonly property real colCpu:  0.16
+  readonly property real colMem:  0.34
+
   onFetchingChanged: {
     if (root.fetching) {
       root.spinning = true
@@ -42,8 +46,16 @@ Panel {
     return false
   }
 
-  function pct(used, max) { return max > 0 ? Math.round((used / max) * 100) : 0 }
-  function gib(bytes)     { return (bytes / 1073741824).toFixed(1) + " GiB" }
+  function gib(bytes)  { return (bytes / 1073741824).toFixed(1) }
+  function gibU(bytes) { return (bytes / 1073741824).toFixed(1) + " GiB" }
+
+  function osGlyph(g) {
+    if (g.type === "lxc") return "󰆧"
+    var o = String(g.ostype || "")
+    if (o.indexOf("win") === 0 || o.indexOf("w2k") === 0) return "󰍲"
+    if (o === "l26" || o === "l24") return "󰌽"
+    return "󰋙"
+  }
 
   KeyboardPanel {
     id: panel
@@ -52,7 +64,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(380))
+    contentWidth: panel.fittedContentWidth(Style.space(400))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
     PanelKeyCatcher {
@@ -118,6 +130,47 @@ Panel {
           }
         }
 
+        Row {
+          width: parent.width
+          spacing: Style.space(8)
+          visible: root.guests.length > 0
+
+          Item { width: Style.space(8); height: 1 }
+          Item { width: root.colOs; height: 1 }
+
+          Text {
+            width: content.width * root.colName
+            text: "guest"
+            color: root.barForeground
+            opacity: 0.85
+            font.bold: true
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.body
+          }
+
+          Text {
+            width: content.width * root.colCpu
+            horizontalAlignment: Text.AlignRight
+            text: "cpu"
+            color: root.barForeground
+            opacity: 0.85
+            font.bold: true
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.body
+          }
+
+          Text {
+            width: content.width * root.colMem
+            horizontalAlignment: Text.AlignRight
+            text: "memory"
+            color: root.barForeground
+            opacity: 0.85
+            font.bold: true
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.body
+          }
+        }
+
         Text {
           width: parent.width
           visible: root.errorText !== ""
@@ -140,12 +193,22 @@ Panel {
               width: Style.space(8); height: width; radius: width / 2
               anchors.verticalCenter: parent.verticalCenter
               color: root.barForeground
-              opacity: modelData.status === "running" ? 1.0 : 0.25
+              opacity: modelData.status === "running" ? 0.9 : 0.45
             }
 
             Text {
-              width: content.width * 0.38
-              text: modelData.name + (modelData.type === "lxc" ? "  ct" : "")
+              width: root.colOs
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.osGlyph(modelData)
+              color: root.barForeground
+              opacity: modelData.status === "running" ? 0.8 : 0.3
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.body
+            }
+
+            Text {
+              width: content.width * root.colName
+              text: modelData.name
               color: root.barForeground
               opacity: modelData.status === "running" ? 1.0 : 0.5
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -154,7 +217,7 @@ Panel {
             }
 
             Text {
-              width: content.width * 0.16
+              width: content.width * root.colCpu
               horizontalAlignment: Text.AlignRight
               text: modelData.status === "running"
                 ? Math.round(modelData.cpu * 100) + "%" : "—"
@@ -165,10 +228,10 @@ Panel {
             }
 
             Text {
-              width: content.width * 0.32
+              width: content.width * root.colMem
               horizontalAlignment: Text.AlignRight
               text: modelData.status === "running"
-                ? root.pct(modelData.mem, modelData.maxmem) + "%  " + root.gib(modelData.maxmem)
+                ? root.gib(modelData.mem) + " / " + root.gibU(modelData.maxmem)
                 : modelData.node
               color: root.barForeground
               opacity: 0.7
